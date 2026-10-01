@@ -229,17 +229,8 @@ export const transferRepo = createServerFn({ method: "POST" })
       tgtHeadSha = ref.object.sha;
     }
 
-    // ---- النقل يتم على فرع "mine" في الهدف، ويُنشأ إن لم يكن موجودًا ----
+    // ---- النقل يتم مباشرة على الفرع الافتراضي للهدف (الذي يقرؤه Lovable وGitHub) ----
     const baseBranch = tgtBranch;
-    const MINE = "mine";
-    let mineExists = false;
-    const mineRes = await readRef(MINE);
-    if (mineRes.ok) {
-      const ref = (await mineRes.json()) as { object: { sha: string } };
-      tgtHeadSha = ref.object.sha;
-      mineExists = true;
-    }
-    tgtBranch = MINE;
 
     let tgtEntries: GhTreeEntry[] = [];
     let tgtTreeSha: string | null = null;
@@ -441,17 +432,11 @@ export const transferRepo = createServerFn({ method: "POST" })
       },
     });
 
-    if (mineExists) {
-      await tgt.json(`/repos/${target}/git/refs/heads/${encodeURIComponent(tgtBranch)}`, {
-        method: "PATCH",
-        body: { sha: commit.sha, force: false },
-      });
-    } else {
-      await tgt.json(`/repos/${target}/git/refs`, {
-        method: "POST",
-        body: { ref: `refs/heads/${tgtBranch}`, sha: commit.sha },
-      });
-    }
+    // الفرع موجود دائمًا هنا (إما أصلًا أو بعد التهيئة)، فنحدّثه للالتزام الجديد.
+    await tgt.json(`/repos/${target}/git/refs/heads/${encodeURIComponent(tgtBranch)}`, {
+      method: "PATCH",
+      body: { sha: commit.sha, force: false },
+    });
 
     return {
       dryRun,
