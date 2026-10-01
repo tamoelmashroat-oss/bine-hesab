@@ -585,7 +585,11 @@ function TransferPage() {
                 <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                   <h2 className="flex min-w-0 items-start gap-2 text-sm font-semibold">
                     <CheckCircle2 className="h-4 w-4 text-success" />
-                    {summary.dryRun ? "نتيجة المعاينة (لم يُنفَّذ أي تغيير)" : "تم النقل بنجاح"}
+                    {summary.dryRun
+                      ? "نتيجة المعاينة (لم يُنفَّذ أي تغيير)"
+                      : summary.committed
+                        ? "تم النقل بنجاح"
+                        : "لا توجد تغييرات — الهدف مطابق للمصدر"}
                   </h2>
                   {summary.targetUrl && (
                     <a
@@ -617,14 +621,9 @@ function TransferPage() {
                   )
                 </p>
 
-                {!summary.dryRun && (
-                  <p className="min-w-0 break-words rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs leading-6 text-primary">
-                    الملفات المنقولة موجودة في الفرع{" "}
-                    <span className="mono" dir="ltr">
-                      {summary.targetBranch}
-                    </span>{" "}
-                    وليس في الفرع الرئيسي. في GitHub اختر هذا الفرع من قائمة الفروع لرؤية التغييرات،
-                    أو اضغط الرابط أعلاه.
+                {!summary.dryRun && !summary.committed && (
+                  <p className="min-w-0 break-words rounded-lg border border-border bg-muted p-3 text-xs leading-6 text-muted-foreground">
+                    لم يُكتب أي شيء: المستودع الهدف مطابق للمصدر بالفعل، فلا توجد تغييرات لنقلها.
                   </p>
                 )}
 
