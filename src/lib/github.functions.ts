@@ -10,9 +10,11 @@ type Slot = "source" | "target";
 
 export type RepoInfo = {
   fullName: string;
+  name: string;
   isPrivate: boolean;
   defaultBranch: string;
   canPush: boolean;
+  createdAt: string;
   description: string | null;
 };
 
@@ -113,16 +115,21 @@ async function listReposFor(client: GhClient): Promise<RepoInfo[]> {
       `/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member&page=${page}`,
     );
     for (const r of data) {
+      const fullName = String(r['full_name']);
       repos.push({
-        fullName: String(r['full_name']),
+        fullName,
+        name: fullName.includes("/") ? fullName.slice(fullName.lastIndexOf("/") + 1) : fullName,
         isPrivate: Boolean(r['private']),
         defaultBranch: String(r['default_branch'] ?? "main"),
         canPush: Boolean((r['permissions'] as Record<string, boolean> | undefined)?.['push']),
+        createdAt: String(r['created_at'] ?? ""),
         description: (r['description'] as string | null) ?? null,
       });
     }
     if (data.length < 100) break;
   }
+  // الأحدث إنشاءً أولًا — وليس الأحدث تحديثًا.
+  repos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return repos;
 }
 
