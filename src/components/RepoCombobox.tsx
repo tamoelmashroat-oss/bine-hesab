@@ -55,7 +55,7 @@ export function RepoCombobox({
               className="h-11 min-w-0 w-full justify-between rounded-xl px-4 py-3 text-sm font-normal"
             >
               <span className={cn("mono min-w-0 truncate", !value && "text-muted-foreground")} dir="ltr">
-                {value || placeholder}
+                {value ? value.slice(value.lastIndexOf("/") + 1) : placeholder}
               </span>
               {loading ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-60" />
@@ -94,7 +94,7 @@ export function RepoCombobox({
                         )}
                       />
                       <span className="mono truncate text-xs" dir="ltr">
-                        {repo.fullName}
+                        {repo.name}
                       </span>
                       {repo.isPrivate && (
                         <Lock className="ms-auto h-3 w-3 shrink-0 text-muted-foreground" />
