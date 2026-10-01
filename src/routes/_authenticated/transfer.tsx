@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -8,7 +8,6 @@ import {
   ExternalLink,
   Github,
   Loader2,
-  LogOut,
   Play,
   ShieldCheck,
   Unplug,
@@ -22,12 +21,12 @@ import {
   startGithubConnect,
   type Slot,
 } from "@/lib/githubConnect.functions";
-import { getIsAdmin } from "@/lib/admin.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { RepoCombobox } from "@/components/RepoCombobox";
 
 export const Route = createFileRoute("/_authenticated/transfer")({
+  validateSearch: (search: Record<string, unknown>): { mode?: "same" } =>
+    search["mode"] === "same" ? { mode: "same" } : {},
   head: () => ({
     meta: [
       { title: "نقل المستودعات — اربط حسابَي GitHub" },
@@ -54,17 +53,21 @@ function waitForOAuthCompletion(popup: Window) {
   return new Promise<{ code: string; state: string } | null>((resolve, reject) => {
     let poll: number | undefined;
     let timeout: number | undefined;
+    // GitHub's security headers can cut the link between the popup and this page
+    // (window.opener becomes null), so also listen on a same-origin BroadcastChannel.
+    const channel =
+      typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("github-oauth") : null;
+    let closedAt: number | undefined;
     const cleanup = () => {
       window.removeEventListener("message", onMessage);
+      channel?.close();
       if (poll !== undefined) window.clearInterval(poll);
       if (timeout !== undefined) window.clearTimeout(timeout);
     };
-    const onMessage = (event: MessageEvent) => {
-      const type = (event.data as { type?: string } | null)?.type;
-      const data = event.data as { connectorId?: string; code?: unknown; state?: unknown };
+    const handle = (raw: unknown) => {
+      const data = raw as { type?: string; connectorId?: string; code?: unknown; state?: unknown } | null;
+      const type = data?.type;
       if (
-        event.origin !== window.location.origin ||
-        event.source !== popup ||
         data?.connectorId !== "github" ||
         (type !== "appUserConnectorOAuthComplete" && type !== "appUserConnectorOAuthFailed")
       )
@@ -81,9 +84,16 @@ function waitForOAuthCompletion(popup: Window) {
       popup.close();
       reject(new Error("لم تكتمل عملية ربط حساب GitHub."));
     };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      handle(event.data);
+    };
     window.addEventListener("message", onMessage);
+    if (channel) channel.onmessage = (event) => handle(event.data);
     poll = window.setInterval(() => {
       if (!popup.closed) return;
+      closedAt ??= Date.now();
+      if (Date.now() - closedAt < 3000) return; // give the broadcast time to arrive
       cleanup();
       reject(new Error("أُغلقت نافذة الربط قبل اكتمالها."));
     }, 500);
@@ -141,7 +151,6 @@ function FileList({ title, files }: { title: string; files: string[] }) {
 }
 
 function TransferPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const getConnectionsFn = useServerFn(getConnections);
@@ -151,9 +160,6 @@ function TransferPage() {
   const listReposFn = useServerFn(listRepos);
   const transferFn = useServerFn(transferRepo);
 
-  const isAdminFn = useServerFn(getIsAdmin);
-  const isAdminQuery = useQuery({ queryKey: ["is-admin"], queryFn: () => isAdminFn() });
-
   const connectionsQuery = useQuery({
     queryKey: ["github-connections"],
     queryFn: () => getConnectionsFn(),
@@ -162,7 +168,11 @@ function TransferPage() {
   const connections = connectionsQuery.data ?? [];
   const sourceConn = connections.find((c) => c.slot === "source");
   const targetConn = connections.find((c) => c.slot === "target");
-  const bothConnected = Boolean(sourceConn?.connected && targetConn?.connected);
+  const search = Route.useSearch();
+  const [sameAccount, setSameAccount] = useState(search.mode === "same");
+  const bothConnected = sameAccount
+    ? Boolean(sourceConn?.connected)
+    : Boolean(sourceConn?.connected && targetConn?.connected);
 
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -190,6 +200,7 @@ function TransferPage() {
       target: string;
       dryRun: boolean;
       confirmDelete: boolean;
+      sameAccount: boolean;
     }) =>
       transferFn({ data: vars }),
   });
@@ -249,13 +260,6 @@ function TransferPage() {
     } finally {
       setBusySlot(null);
     }
-  }
-
-  async function signOut() {
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
   }
 
   const srcValid = REPO_PATTERN.test(source.trim());
@@ -345,31 +349,11 @@ function TransferPage() {
       <div className="app-grid-bg min-h-screen">
         <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 pb-12 sm:px-5 sm:pb-16">
           <header className="flex flex-col gap-3 py-6 sm:py-10">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                  <ArrowLeftRight className="h-5 w-5" />
-                </span>
-                <h1 className="truncate text-xl font-bold sm:text-2xl">نقل المستودعات</h1>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-                <Button asChild size="sm" variant="outline" title="نقل قاعدة بيانات Supabase">
-                  <Link to="/database">قاعدة البيانات</Link>
-                </Button>
-                {isAdminQuery.data?.isAdmin && (
-                  <Button asChild size="icon" variant="ghost" title="الإعدادات">
-                    <Link to="/admin">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      <span className="sr-only">الإعدادات</span>
-                    </Link>
-                  </Button>
-                )}
-                <Button type="button" onClick={signOut} size="icon" variant="outline" title="تسجيل الخروج">
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span className="sr-only">خروج</span>
-                </Button>
-              </div>
-
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <ArrowLeftRight className="h-5 w-5" />
+              </span>
+              <h1 className="truncate text-xl font-bold sm:text-2xl">نقل المستودعات</h1>
             </div>
             <p className="max-w-2xl break-words text-sm leading-6 text-muted-foreground">
               اربط حسابَي GitHub الخاصين بك (المصدر والهدف)، ثم انقل أي مستودع بينهما.
@@ -399,6 +383,35 @@ function TransferPage() {
 
             <section className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-lg shadow-background/20 sm:p-6">
               <div className="flex flex-col gap-5">
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted/40 p-1 text-sm">
+                  {[
+                    { v: false, l: "بين حسابين مختلفين" },
+                    { v: true, l: "داخل نفس الحساب" },
+                  ].map((o) => (
+                    <button
+                      key={o.l}
+                      type="button"
+                      onClick={() => {
+                        setSameAccount(o.v);
+                        setTarget("");
+                        transfer.reset();
+                      }}
+                      className={`rounded-lg px-3 py-2 transition-colors ${
+                        sameAccount === o.v
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {o.l}
+                    </button>
+                  ))}
+                </div>
+                {sameAccount && (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    مزامنة كاملة بين مستودعين في حساب المصدر: تُضاف ملفات المصدر الجديدة، وتُحدَّث الملفات
+                    المتشابهة، وتُحذف ملفات الهدف التي لا مقابل لها — مع حماية ملفات ربط Lovable.
+                  </p>
+                )}
                 <div className="flex flex-col gap-2">
                   <label htmlFor="source" className="text-sm font-medium">
                     المستودع المصدر
@@ -439,26 +452,32 @@ function TransferPage() {
                   </label>
                   <RepoCombobox
                     id="target"
-                    repos={(targetRepos.data ?? []).filter((r) => r.canPush)}
+                    repos={((sameAccount ? sourceRepos.data : targetRepos.data) ?? []).filter((r) => r.canPush)}
                     value={target}
                     onChange={setTarget}
-                    loading={targetRepos.isFetching}
-                    disabled={!targetConn?.connected}
+                    loading={sameAccount ? sourceRepos.isFetching : targetRepos.isFetching}
+                    disabled={sameAccount ? !sourceConn?.connected : !targetConn?.connected}
                     error={
                       targetRepos.isError
                         ? (targetRepos.error as Error).message
                         : null
                     }
-                    onRefresh={() => targetRepos.refetch()}
+                    onRefresh={() => (sameAccount ? sourceRepos.refetch() : targetRepos.refetch())}
                     placeholder={
-                      targetConn?.connected
+                      sameAccount
+                        ? sourceConn?.connected
+                          ? "اختر مستودعًا آخر من نفس الحساب…"
+                          : "اربط حساب المصدر أولًا"
+                        : targetConn?.connected
                         ? "اختر مستودعًا من حساب الهدف…"
                         : "اربط حساب الهدف أولًا"
                     }
                     emptyText="لا يوجد مستودع مطابق تملك صلاحية الكتابة عليه."
                   />
                   <p className="text-xs text-muted-foreground">
-                    من حساب الهدف — يجب أن يملك صلاحية الكتابة عليه.
+                    {sameAccount
+                      ? "من نفس حساب المصدر — يجب أن تملك صلاحية الكتابة عليه."
+                      : "من حساب الهدف — يجب أن يملك صلاحية الكتابة عليه."}
                   </p>
                 </div>
 
@@ -469,7 +488,7 @@ function TransferPage() {
                 )}
                 {!bothConnected && (
                   <p className="text-sm text-muted-foreground">
-                    اربط الحسابين أعلاه لتفعيل النقل.
+                    {sameAccount ? "اربط حساب المصدر أعلاه لتفعيل النقل." : "اربط الحسابين أعلاه لتفعيل النقل."}
                   </p>
                 )}
 
@@ -510,6 +529,7 @@ function TransferPage() {
                         target: target.trim(),
                         dryRun,
                         confirmDelete: dryRun || confirmDelete,
+                        sameAccount,
                       })
                     }
                     size="lg"

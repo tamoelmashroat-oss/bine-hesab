@@ -38,7 +38,7 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/transfer", replace: true });
+      if (data.user) navigate({ to: "/transfer", search: {}, replace: true });
     });
   }, [navigate]);
 
@@ -105,7 +105,7 @@ function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
-      navigate({ to: "/transfer", replace: true });
+      navigate({ to: "/transfer", search: {}, replace: true });
     } catch (err) {
       setError(toArabic(err instanceof Error ? err.message : "حدث خطأ غير متوقع."));
     } finally {

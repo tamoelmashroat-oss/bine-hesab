@@ -29,16 +29,19 @@ function OAuthReturn() {
       type: "appUserConnectorOAuthComplete" | "appUserConnectorOAuthFailed",
       payload?: { code: string; state: string },
     ) => {
-      window.opener?.postMessage(
-        {
-          type,
-          connectorId: "github",
-          code: payload?.code ?? null,
-          state: payload?.state ?? null,
-        },
-        window.location.origin,
-      );
-      window.close();
+      const msg = {
+        type,
+        connectorId: "github",
+        code: payload?.code ?? null,
+        state: payload?.state ?? null,
+      };
+      window.opener?.postMessage(msg, window.location.origin);
+      if (typeof BroadcastChannel !== "undefined") {
+        const ch = new BroadcastChannel("github-oauth");
+        ch.postMessage(msg);
+        ch.close();
+      }
+      window.setTimeout(() => window.close(), 300);
     };
 
     const error = params.get("error_description") ?? params.get("error");

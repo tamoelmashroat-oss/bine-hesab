@@ -87,7 +87,7 @@ function AdminPage() {
         <ShieldCheck className="h-8 w-8 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">هذه الصفحة مخصّصة لمدير التطبيق فقط.</p>
         <Button asChild variant="outline">
-          <Link to="/transfer">العودة</Link>
+          <Link to="/transfer" search={{}}>العودة</Link>
         </Button>
       </div>
     );
@@ -202,7 +202,7 @@ function AdminPage() {
             </Button>
           )}
           <Button asChild variant="ghost" className="w-full sm:w-auto">
-            <Link to="/transfer">
+            <Link to="/transfer" search={{}}>
               <ArrowRight className="me-2 h-4 w-4" />
               صفحة النقل
             </Link>

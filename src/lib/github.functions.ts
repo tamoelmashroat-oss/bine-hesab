@@ -141,6 +141,7 @@ const transferInput = z.object({
   message: z.string().max(300).optional(),
   dryRun: z.boolean().optional(),
   confirmDelete: z.boolean().optional(),
+  sameAccount: z.boolean().optional(),
 });
 
 export const transferRepo = createServerFn({ method: "POST" })
@@ -152,13 +153,15 @@ export const transferRepo = createServerFn({ method: "POST" })
     const dryRun = data.dryRun ?? false;
 
     const src = await makeClient(context.userId, "source");
-    const tgt = await makeClient(context.userId, "target");
+    const sameAccount = data.sameAccount ?? false;
+    // داخل نفس الحساب: يُستخدم حساب المصدر للقراءة والكتابة معًا.
+    const tgt = sameAccount ? src : await makeClient(context.userId, "target");
 
     const [sourceAccount, targetAccount] = await Promise.all([
       src.json<{ id: number }>("/user"),
-      tgt.json<{ id: number }>("/user"),
+      sameAccount ? Promise.resolve({ id: -1 }) : tgt.json<{ id: number }>("/user"),
     ]);
-    if (sourceAccount.id === targetAccount.id) {
+    if (!sameAccount && sourceAccount.id === targetAccount.id) {
       throw new Error("اربط حسابَي GitHub مختلفين للمصدر والهدف قبل بدء النقل.");
     }
 
@@ -226,6 +229,18 @@ export const transferRepo = createServerFn({ method: "POST" })
       tgtHeadSha = ref.object.sha;
     }
 
+    // ---- النقل يتم على فرع "mine" في الهدف، ويُنشأ إن لم يكن موجودًا ----
+    const baseBranch = tgtBranch;
+    const MINE = "mine";
+    let mineExists = false;
+    const mineRes = await readRef(MINE);
+    if (mineRes.ok) {
+      const ref = (await mineRes.json()) as { object: { sha: string } };
+      tgtHeadSha = ref.object.sha;
+      mineExists = true;
+    }
+    tgtBranch = MINE;
+
     let tgtEntries: GhTreeEntry[] = [];
     let tgtTreeSha: string | null = null;
     if (tgtHeadSha) {
@@ -233,7 +248,7 @@ export const transferRepo = createServerFn({ method: "POST" })
         tree: GhTreeEntry[];
         truncated: boolean;
         sha: string;
-      }>(`/repos/${target}/git/trees/${encodeURIComponent(tgtBranch)}?recursive=1`);
+      }>(`/repos/${target}/git/trees/${tgtHeadSha}?recursive=1`);
       if (tgtTree.truncated) {
         throw new Error("المستودع الهدف أكبر من أن يُقرأ دفعة واحدة عبر واجهة GitHub.");
       }
@@ -339,7 +354,7 @@ export const transferRepo = createServerFn({ method: "POST" })
           body: {
             message: "Initialize repository",
             content: Buffer.from("init\n", "utf8").toString("base64"),
-            branch: tgtBranch,
+            branch: baseBranch,
           },
         },
       );
@@ -401,6 +416,10 @@ export const transferRepo = createServerFn({ method: "POST" })
     for (const path of deleted) {
       treeEntries.push({ path, mode: "100644", type: "blob", sha: null });
     }
+    // ملف التهيئة المؤقت ليس له نظير في المصدر، فيُحذف من الفرع.
+    if (bootstrapCreated && !srcBlobs.has(bootstrapPath)) {
+      treeEntries.push({ path: bootstrapPath, mode: "100644", type: "blob", sha: null });
+    }
 
     const newTree = await tgt.json<{ sha: string }>(`/repos/${target}/git/trees`, {
       method: "POST",
@@ -422,7 +441,7 @@ export const transferRepo = createServerFn({ method: "POST" })
       },
     });
 
-    if (tgtHeadSha) {
+    if (mineExists) {
       await tgt.json(`/repos/${target}/git/refs/heads/${encodeURIComponent(tgtBranch)}`, {
         method: "PATCH",
         body: { sha: commit.sha, force: false },
