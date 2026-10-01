@@ -589,12 +589,14 @@ function TransferPage() {
                   </h2>
                   {summary.targetUrl && (
                     <a
-                      href={summary.targetUrl}
+                      href={`${summary.targetUrl}/tree/${encodeURIComponent(summary.targetBranch)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex min-w-0 items-center gap-1.5 text-xs text-primary hover:underline"
                     >
-                      <span className="truncate">{summary.target}</span>
+                      <span className="truncate">
+                        {summary.target} ({summary.targetBranch})
+                      </span>
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
@@ -614,6 +616,17 @@ function TransferPage() {
                   </span>
                   )
                 </p>
+
+                {!summary.dryRun && (
+                  <p className="min-w-0 break-words rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs leading-6 text-primary">
+                    الملفات المنقولة موجودة في الفرع{" "}
+                    <span className="mono" dir="ltr">
+                      {summary.targetBranch}
+                    </span>{" "}
+                    وليس في الفرع الرئيسي. في GitHub اختر هذا الفرع من قائمة الفروع لرؤية التغييرات،
+                    أو اضغط الرابط أعلاه.
+                  </p>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <StatChip label="مضاف" value={summary.added.length} tone="added" />
